@@ -1,0 +1,52 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rag-knowledge-assistant"
+version = "0.2.0"
+description = "Open-source minimal RAG knowledge assistant with a FastAPI retrieval API."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+authors = [
+  { name = "rag-knowledge-assistant contributors" }
+]
+keywords = ["rag", "retrieval", "fastapi", "knowledge-base", "vector-free", "open-source"]
+dependencies = [
+  "fastapi>=0.110",
+  "uvicorn[standard]>=0.29",
+  "pydantic>=2.7",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0",
+  "httpx>=0.27",
+  "ruff>=0.6"
+]
+embeddings = [
+  "numpy>=1.26",
+  "sentence-transformers>=3.1"
+]
+onnx = [
+  "onnxruntime>=1.17",
+  "transformers>=4.42"
+]
+
+[project.urls]
+Source = "https://github.com/example/rag-knowledge-assistant"
+Issues = "https://github.com/example/rag-knowledge-assistant/issues"
+
+[project.scripts]
+rag-knowledge-assistant = "rag_assistant.cli:main"
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+addopts = "-q"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]

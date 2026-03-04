@@ -1,0 +1,17 @@
+services:
+  rag-assistant:
+    build: .
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env.example
+    environment:
+      RAG_STORAGE_PATH: /app/data/rag-index.json
+      RAG_HOST: 0.0.0.0
+      RAG_PORT: 8000
+    volumes:
+      - rag_data:/app/data
+    command: ["uvicorn", "rag_assistant.api:app", "--host", "0.0.0.0", "--port", "8000"]
+
+volumes:
+  rag_data:
