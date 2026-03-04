@@ -88,13 +88,22 @@ uvicorn rag_assistant.api:app --reload --app-dir src
 RAG_API_KEY=dev RAG_STORAGE_PATH=./data/rag-index.json uvicorn rag_assistant.api:app --reload --app-dir src
 ```
 
-### 3) Or run with CLI helper
+### 3) Use the built-in UI
+
+```text
+http://localhost:8000/ui/
+```
+
+The page can ingest content and run both TF-IDF and semantic queries.
+If you configured an API key, paste it into the UI.
+
+### 4) Or run with CLI helper
 
 ```bash
 python -m rag_assistant.cli
 ```
 
-### 4) Ingest
+### 5) Ingest
 
 ```bash
 curl -X POST http://localhost:8000/ingest \
@@ -103,7 +112,7 @@ curl -X POST http://localhost:8000/ingest \
   -d '{"source_id":"guide-1","content":"RAG combines retrieval with generation."}'
 ```
 
-### 5) Query
+### 6) Query
 
 ```bash
 curl -X POST http://localhost:8000/query \
@@ -130,7 +139,7 @@ curl -X POST http://localhost:8000/query/semantic \
   -d '{"question":"How can embeddings be generated?","top_k":3,"embedding_provider":"local_tfidf","local_dimensions":64}'
 ```
 
-### 6) Optional: tests
+### 7) Optional: tests
 
 ```bash
 pytest
@@ -168,6 +177,9 @@ Docs UI: `http://localhost:8000/docs`
 - Dockerfile includes the image entrypoint for API only.
 - `docker-compose.yml` mounts a data volume and wires `RAG_STORAGE_PATH` by default.
 - Update `.env` for environment-specific overrides.
+- GitHub Pages workflow publishes the `ui/` static site from `.github/workflows/pages.yml`:
+  - Push to `main`/`master`, then enable GitHub Pages with source `GitHub Actions`.
+  - If API key is required, set `RAG_ALLOWED_ORIGINS` to your page origin (for example `https://<user>.github.io`).
 
 ---
 

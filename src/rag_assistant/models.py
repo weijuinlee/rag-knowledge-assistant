@@ -6,8 +6,8 @@ from pydantic import BaseModel, Field, conint
 class IngestRequest(BaseModel):
     source_id: str = Field(min_length=1, strip_whitespace=True)
     content: str = Field(min_length=1)
-    chunk_size: conint(ge=64, le=4000) = 800
-    chunk_overlap: conint(ge=0, le=3000) = 120
+    chunk_size: conint(ge=1, le=4000) = 800
+    chunk_overlap: conint(ge=0, le=4000) = 120
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
 

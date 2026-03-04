@@ -1,0 +1,405 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>RAG Knowledge Assistant</title>
+    <style>
+      :root {
+        --bg: #0b1020;
+        --panel: #121b33;
+        --panel-soft: #1f2a46;
+        --text: #eff2ff;
+        --muted: #96a2c6;
+        --accent: #7fb8ff;
+        --accent-strong: #62a2f9;
+        --danger: #ff7f7f;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        font-family: "Trebuchet MS", "Gill Sans", "Segoe UI", Arial, sans-serif;
+        color: var(--text);
+        background: radial-gradient(circle at top, #1b2647 0%, var(--bg) 55%, #05070f 100%);
+        min-height: 100vh;
+      }
+
+      header {
+        padding: 1.5rem;
+        border-bottom: 1px solid #263457;
+        background: rgba(7, 10, 20, 0.7);
+        position: sticky;
+        top: 0;
+        backdrop-filter: blur(4px);
+      }
+
+      header h1 {
+        margin: 0;
+        font-size: 1.6rem;
+      }
+
+      .subtitle {
+        margin-top: 0.35rem;
+        color: var(--muted);
+      }
+
+      main {
+        max-width: 980px;
+        margin: 0 auto;
+        padding: 1rem;
+      }
+
+      .grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 1rem;
+      }
+
+      .card {
+        background: var(--panel);
+        border: 1px solid #27335b;
+        border-radius: 8px;
+        padding: 1rem;
+        margin-bottom: 1rem;
+      }
+
+      .card h2 {
+        margin-top: 0;
+      }
+
+      label {
+        display: block;
+        margin: 0.65rem 0 0.2rem;
+        color: #d3dcff;
+        font-size: 0.95rem;
+      }
+
+      input,
+      textarea,
+      select,
+      button {
+        width: 100%;
+        border-radius: 6px;
+        border: 1px solid #32406d;
+        background: #0a1024;
+        color: var(--text);
+        padding: 0.55rem;
+        margin-bottom: 0.6rem;
+        font-size: 0.95rem;
+      }
+
+      textarea {
+        min-height: 150px;
+        resize: vertical;
+      }
+
+      button {
+        background: var(--accent);
+        border-color: var(--accent);
+        color: #09122a;
+        font-weight: 600;
+        cursor: pointer;
+      }
+
+      button:hover {
+        background: var(--accent-strong);
+      }
+
+      button.secondary {
+        background: #24345f;
+        color: var(--text);
+      }
+
+      #semantic-fields {
+        border-top: 1px dashed #3b4b79;
+        margin-top: 0.6rem;
+        padding-top: 0.6rem;
+      }
+
+      .hidden {
+        display: none;
+      }
+
+      .status {
+        padding: 0.6rem 0.8rem;
+        border-radius: 6px;
+        margin-top: 0.75rem;
+      }
+
+      .status.ok {
+        background: #17381f;
+        border: 1px solid #2a8a36;
+      }
+
+      .status.err {
+        background: #431c2b;
+        border: 1px solid #8a2f42;
+      }
+
+      pre {
+        margin: 0;
+        white-space: pre-wrap;
+        word-break: break-word;
+        background: #090f21;
+        border: 1px solid #27335b;
+        border-radius: 8px;
+        padding: 0.8rem;
+        min-height: 180px;
+        font-size: 0.88rem;
+      }
+
+      @media (max-width: 900px) {
+        .grid {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>RAG Knowledge Assistant</h1>
+      <div class="subtitle">Simple browser UI for ingest and query operations</div>
+    </header>
+
+    <main>
+      <section class="card">
+        <h2>Connection</h2>
+        <label for="api-base">API base URL</label>
+        <input id="api-base" value="http://localhost:8000" />
+
+        <label for="api-key">API key (optional)</label>
+        <input id="api-key" type="text" placeholder="x-api-key header value" />
+
+        <div id="connection-status" class="status ok">Ready</div>
+        <button id="check-health" class="secondary" type="button">Check /health</button>
+      </section>
+
+      <div class="grid">
+        <section class="card">
+          <h2>Ingest document</h2>
+          <form id="ingest-form">
+            <label for="source-id">Source ID</label>
+            <input id="source-id" placeholder="example-doc" required />
+
+            <label for="chunk-size">Chunk size</label>
+            <input id="chunk-size" type="number" min="64" max="4000" value="800" />
+
+            <label for="chunk-overlap">Chunk overlap</label>
+            <input id="chunk-overlap" type="number" min="0" max="3000" value="120" />
+
+            <label for="metadata">Metadata JSON (optional)</label>
+            <textarea id="metadata" placeholder='{"author":"you","topic":"notes"}'></textarea>
+
+            <label for="content">Content</label>
+            <textarea id="content" required placeholder="Paste content to index..."></textarea>
+
+            <button type="submit">Ingest</button>
+          </form>
+        </section>
+
+        <section class="card">
+          <h2>Query</h2>
+          <form id="query-form">
+            <label for="question">Question</label>
+            <textarea id="question" required placeholder="What do you want to know?"></textarea>
+
+            <label for="top-k">Top k</label>
+            <input id="top-k" type="number" min="1" max="20" value="5" />
+
+            <label for="min-score">Min score</label>
+            <input id="min-score" type="number" min="0" max="1" step="0.01" value="0.0" />
+
+            <label for="retrieval">Retrieval</label>
+            <select id="retrieval">
+              <option value="tfidf">TF-IDF</option>
+              <option value="semantic">Semantic</option>
+            </select>
+
+            <div id="semantic-fields" class="hidden">
+              <label for="embedding-provider">Embedding provider</label>
+              <select id="embedding-provider">
+                <option value="sentence_transformers">sentence_transformers</option>
+                <option value="local">local</option>
+                <option value="local_hash">local_hash</option>
+                <option value="local_tfidf">local_tfidf</option>
+                <option value="onnx_local">onnx_local</option>
+              </select>
+
+              <label for="embedding-model">Embedding model (optional)</label>
+              <input id="embedding-model" value="sentence-transformers/all-MiniLM-L6-v2" />
+
+              <label for="local-dimensions">Local dimensions (optional)</label>
+              <input id="local-dimensions" type="number" min="8" max="4096" value="256" />
+            </div>
+
+            <button type="submit">Search</button>
+          </form>
+        </section>
+      </div>
+
+      <section class="card">
+        <h2>Response</h2>
+        <button id="clear-output" class="secondary" type="button">Clear output</button>
+        <pre id="output">// Results will appear here</pre>
+      </section>
+    </main>
+
+    <script>
+      const output = document.getElementById("output");
+      const statusEl = document.getElementById("connection-status");
+      const apiBaseInput = document.getElementById("api-base");
+      const apiKeyInput = document.getElementById("api-key");
+      const retrievalSelect = document.getElementById("retrieval");
+      const semanticFields = document.getElementById("semantic-fields");
+
+      function setConnectionStatus(text, ok = true) {
+        statusEl.textContent = text;
+        statusEl.className = `status ${ok ? "ok" : "err"}`;
+      }
+
+      function apiBase() {
+        return apiBaseInput.value.replace(/\/$/, "");
+      }
+
+      function apiHeaders() {
+        const headers = {
+          "Content-Type": "application/json",
+        };
+        if (apiKeyInput.value.trim()) {
+          headers["x-api-key"] = apiKeyInput.value.trim();
+        }
+        return headers;
+      }
+
+      function setOutput(data) {
+        output.textContent = JSON.stringify(data, null, 2);
+      }
+
+      async function callApi(path, method, payload = null) {
+        const url = `${apiBase()}${path}`;
+        const options = {
+          method,
+          headers: apiHeaders(),
+        };
+        if (payload) {
+          options.body = JSON.stringify(payload);
+        }
+        const response = await fetch(url, options);
+        const raw = await response.text();
+        let parsed = {};
+        try {
+          parsed = raw ? JSON.parse(raw) : {};
+        } catch {
+          parsed = { raw };
+        }
+        if (!response.ok) {
+          throw new Error(parsed.message || parsed.error || JSON.stringify(parsed));
+        }
+        return parsed;
+      }
+
+      function parseIntOrDefault(value, fallback) {
+        const number = Number.parseInt(value, 10);
+        return Number.isFinite(number) ? number : fallback;
+      }
+
+      function parseFloatOrDefault(value, fallback) {
+        const number = Number.parseFloat(value);
+        return Number.isFinite(number) ? number : fallback;
+      }
+
+      document.getElementById("check-health").addEventListener("click", async () => {
+        try {
+          setConnectionStatus("Checking health...");
+          const result = await callApi("/health", "GET");
+          setOutput(result);
+          setConnectionStatus(`Connected to ${result.service}`, true);
+        } catch (error) {
+          setConnectionStatus(`Health check failed: ${error.message}`, false);
+        }
+      });
+
+      retrievalSelect.addEventListener("change", () => {
+        semanticFields.classList.toggle("hidden", retrievalSelect.value !== "semantic");
+      });
+
+      document.getElementById("ingest-form").addEventListener("submit", async (event) => {
+        event.preventDefault();
+        setOutput({ status: "Ingesting..." });
+
+        let metadata = {};
+        const metadataText = document.getElementById("metadata").value.trim();
+        if (metadataText) {
+          try {
+            metadata = JSON.parse(metadataText);
+          } catch (error) {
+            setConnectionStatus(`Invalid metadata JSON: ${error.message}`, false);
+            return;
+          }
+        }
+
+        const payload = {
+          source_id: document.getElementById("source-id").value.trim(),
+          content: document.getElementById("content").value.trim(),
+          chunk_size: parseIntOrDefault(document.getElementById("chunk-size").value, 800),
+          chunk_overlap: parseIntOrDefault(document.getElementById("chunk-overlap").value, 120),
+          metadata,
+        };
+
+        try {
+          const result = await callApi("/ingest", "POST", payload);
+          setOutput(result);
+          setConnectionStatus("Ingested successfully");
+        } catch (error) {
+          setConnectionStatus(error.message, false);
+        }
+      });
+
+      document.getElementById("query-form").addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const question = document.getElementById("question").value.trim();
+        const topK = parseIntOrDefault(document.getElementById("top-k").value, 5);
+        const minScore = parseFloatOrDefault(document.getElementById("min-score").value, 0.0);
+
+        let payload = {
+          question,
+          top_k: topK,
+          min_score: minScore,
+        };
+
+        let endpoint = "/query";
+        if (retrievalSelect.value === "semantic") {
+          endpoint = "/query/semantic";
+          payload = {
+            ...payload,
+            embedding_provider: document.getElementById("embedding-provider").value,
+            embedding_model: document.getElementById("embedding-model").value.trim() || null,
+            local_dimensions: parseIntOrDefault(document.getElementById("local-dimensions").value, 256),
+          };
+        } else {
+          payload = {
+            ...payload,
+            retrieval: "tfidf",
+          };
+        }
+
+        setOutput({ status: "Querying..." });
+        try {
+          const result = await callApi(endpoint, "POST", payload);
+          setOutput(result);
+          setConnectionStatus(`Found ${result.count} chunk(s)`);
+        } catch (error) {
+          setConnectionStatus(error.message, false);
+        }
+      });
+
+      document.getElementById("clear-output").addEventListener("click", () => {
+        setOutput({});
+      });
+    </script>
+  </body>
+</html>

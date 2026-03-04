@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import time
+from pathlib import Path
 from collections import defaultdict, deque
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -11,7 +12,8 @@ from typing import Dict, Deque
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
 
 from rag_assistant import __version__
 from rag_assistant.config import AppConfig
@@ -52,6 +54,11 @@ app = FastAPI(
     redoc_url="/redoc" if app_config.docs_enabled else None,
     openapi_url="/openapi.json" if app_config.docs_enabled else None,
 )
+
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+_UI_DIR = _PROJECT_ROOT / "ui"
+if _UI_DIR.is_dir():
+    app.mount("/ui", StaticFiles(directory=str(_UI_DIR), html=True), name="ui")
 
 if app_config.allowed_origins:
     app.add_middleware(
@@ -152,6 +159,15 @@ def _is_exempt_from_rate_limit(path: str) -> bool:
     return path.startswith("/health") or path.startswith("/ready") or path.startswith("/docs") or path.startswith("/redoc") or path.startswith("/openapi.json") or path.startswith("/metrics")
 
 
+def _should_enforce_rate_limit(request: Request) -> bool:
+    if app_config.api_key is None:
+        return True
+    supplied_key = request.headers.get("x-api-key")
+    if not supplied_key:
+        return False
+    return supplied_key == app_config.api_key
+
+
 def _is_json_request(request: Request) -> bool:
     return request.method in {"POST", "PUT", "PATCH", "DELETE"}
 
@@ -209,12 +225,12 @@ async def observability_and_security_middleware(request: Request, call_next):
     request.state.request_id = request_id
     path = _route_key_from_request(request)
 
-    if _is_exempt_from_rate_limit(path) is False:
-        if app_config.rate_limit_requests > 0:
-            allowed, remaining, reset_after = _rate_limiter.allow(_client_key(request))
-            if not allowed:
-                raise HTTPException(
-                    status_code=429,
+        if _is_exempt_from_rate_limit(path) is False and _should_enforce_rate_limit(request):
+            if app_config.rate_limit_requests > 0:
+                allowed, remaining, reset_after = _rate_limiter.allow(_client_key(request))
+                if not allowed:
+                    raise HTTPException(
+                        status_code=429,
                     detail="Rate limit exceeded. Retry later.",
                 )
             request.state.rate_limit_remaining = remaining
@@ -341,6 +357,18 @@ def health_check() -> dict:
         }
     )
     return status_data
+
+
+@app.get("/", include_in_schema=False)
+def root() -> RedirectResponse | dict:
+    if _UI_DIR.is_dir():
+        return RedirectResponse(url="/ui/")
+    return {
+        "status": "ok",
+        "service": app_config.service_name,
+        "version": __version__,
+        "ui": "disabled (missing ui directory)",
+    }
 
 
 @app.get("/ready")
