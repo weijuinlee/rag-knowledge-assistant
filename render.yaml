@@ -1,0 +1,32 @@
+services:
+  - type: web
+    name: rag-knowledge-assistant-api
+    env: docker
+    dockerfilePath: ./Dockerfile
+    buildCommand: ""
+    startCommand: uvicorn rag_assistant.api:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /healthz
+    envVars:
+      - key: RAG_HOST
+        value: 0.0.0.0
+      - key: RAG_PORT
+        value: "$PORT"
+      - key: RAG_STORAGE_PATH
+        value: /var/data/rag-index.json
+      - key: RAG_ALLOWED_ORIGINS
+        value: https://<YOUR_PAGES_ORIGIN>
+      - key: RAG_GITHUB_PAGES_ORIGIN
+        value: https://<YOUR_PAGES_ORIGIN>
+      - key: RAG_API_KEY
+        sync: false
+
+  - type: static_site
+    name: rag-knowledge-assistant-ui
+    staticPublishPath: dist
+    buildCommand: |
+      mkdir -p dist
+      cp -R ui/. dist/
+      sed -i "s|__VITE_API_BASE_URL__|${VITE_API_BASE_URL}|g" dist/index.html
+    envVars:
+      - key: VITE_API_BASE_URL
+        value: https://<YOUR_BACKEND_URL>
