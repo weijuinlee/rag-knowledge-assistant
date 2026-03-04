@@ -1,6 +1,7 @@
 services:
   - type: web
     name: rag-knowledge-assistant-api
+    plan: free
     env: docker
     dockerfilePath: ./Dockerfile
     healthCheckPath: /healthz
@@ -16,6 +17,7 @@ services:
 
   - type: web
     env: static
+    plan: free
     name: rag-knowledge-assistant-ui
     staticPublishPath: dist
     buildCommand: |
