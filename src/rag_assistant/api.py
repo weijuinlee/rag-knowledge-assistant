@@ -55,7 +55,7 @@ app = FastAPI(
     openapi_url="/openapi.json" if app_config.docs_enabled else None,
 )
 
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+_PROJECT_ROOT = Path(__file__).resolve().parents[2]
 _UI_DIR = _PROJECT_ROOT / "ui"
 if _UI_DIR.is_dir():
     app.mount("/ui", StaticFiles(directory=str(_UI_DIR), html=True), name="ui")
