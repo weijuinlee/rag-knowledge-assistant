@@ -225,32 +225,38 @@ async def observability_and_security_middleware(request: Request, call_next):
     request.state.request_id = request_id
     path = _route_key_from_request(request)
 
-        if _is_exempt_from_rate_limit(path) is False and _should_enforce_rate_limit(request):
-            if app_config.rate_limit_requests > 0:
-                allowed, remaining, reset_after = _rate_limiter.allow(_client_key(request))
-                if not allowed:
-                    raise HTTPException(
-                        status_code=429,
-                    detail="Rate limit exceeded. Retry later.",
-                )
+    if _is_exempt_from_rate_limit(path) is False and _should_enforce_rate_limit(request):
+        if app_config.rate_limit_requests > 0:
+            allowed, remaining, reset_after = _rate_limiter.allow(_client_key(request))
+            if not allowed:
+                payload = _error_payload(request, 429, "Rate limit exceeded. Retry later.")
+                denied = JSONResponse(status_code=429, content=payload.model_dump())
+                denied.headers["x-ratelimit-limit"] = str(app_config.rate_limit_requests)
+                denied.headers["x-ratelimit-remaining"] = "0"
+                denied.headers["x-ratelimit-reset-after"] = str(reset_after)
+                denied.headers["x-request-id"] = request.state.request_id
+
+                _metrics_collector.record(request.method, path, 429, 0.0)
+                return denied
+
             request.state.rate_limit_remaining = remaining
             request.state.rate_limit_reset_after = reset_after
 
-        content_length = request.headers.get("content-length")
-        if content_length and _is_json_request(request):
-            try:
-                body_size = int(content_length)
-            except ValueError as exc:
-                raise HTTPException(
-                    status_code=400,
-                    detail="Invalid Content-Length header.",
-                ) from exc
+    content_length = request.headers.get("content-length")
+    if content_length and _is_json_request(request):
+        try:
+            body_size = int(content_length)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid Content-Length header.",
+            ) from exc
 
-            if body_size > app_config.request_body_limit_bytes:
-                raise HTTPException(
-                    status_code=413,
-                    detail=f"Request body exceeds configured limit ({app_config.request_body_limit_bytes} bytes).",
-                )
+        if body_size > app_config.request_body_limit_bytes:
+            raise HTTPException(
+                status_code=413,
+                detail=f"Request body exceeds configured limit ({app_config.request_body_limit_bytes} bytes).",
+            )
 
     try:
         response = await call_next(request)
@@ -359,8 +365,8 @@ def health_check() -> dict:
     return status_data
 
 
-@app.get("/", include_in_schema=False)
-def root() -> RedirectResponse | dict:
+@app.get("/", include_in_schema=False, response_model=None)
+def root():
     if _UI_DIR.is_dir():
         return RedirectResponse(url="/ui/")
     return {

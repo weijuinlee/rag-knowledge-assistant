@@ -1,14 +1,22 @@
 from typing import Any, Dict, List, Literal, Optional
 
-from pydantic import BaseModel, Field, conint
+from pydantic import BaseModel, Field, conint, field_validator
 
 
 class IngestRequest(BaseModel):
-    source_id: str = Field(min_length=1, strip_whitespace=True)
+    source_id: str = Field(min_length=1)
     content: str = Field(min_length=1)
     chunk_size: conint(ge=1, le=4000) = 800
     chunk_overlap: conint(ge=0, le=4000) = 120
     metadata: Dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("source_id")
+    @classmethod
+    def _strip_source_id(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("source_id cannot be empty")
+        return value
 
 
 class IngestResponse(BaseModel):
@@ -28,15 +36,23 @@ class BulkIngestResponse(BaseModel):
 
 
 class QueryRequest(BaseModel):
-    question: str = Field(min_length=1, strip_whitespace=True)
+    question: str = Field(min_length=1)
     top_k: conint(ge=1, le=20) = 5
     min_score: float = Field(default=0.0, ge=0.0, le=1.0)
     retrieval: Literal["tfidf", "semantic"] = "tfidf"
     embedding_model: Optional[str] = Field(default=None, min_length=1)
 
+    @field_validator("question")
+    @classmethod
+    def _strip_question(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("question cannot be empty")
+        return value
+
 
 class SemanticQueryRequest(BaseModel):
-    question: str = Field(min_length=1, strip_whitespace=True)
+    question: str = Field(min_length=1)
     top_k: conint(ge=1, le=20) = 5
     min_score: float = Field(default=0.0, ge=0.0, le=1.0)
     embedding_model: Optional[str] = Field(default=None, min_length=1)
@@ -48,6 +64,14 @@ class SemanticQueryRequest(BaseModel):
         "onnx_local",
     ] = "sentence_transformers"
     local_dimensions: conint(ge=8, le=4096) = 256
+
+    @field_validator("question")
+    @classmethod
+    def _strip_question(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("question cannot be empty")
+        return value
 
 
 class ContextChunk(BaseModel):

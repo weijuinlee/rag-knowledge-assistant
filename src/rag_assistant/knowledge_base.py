@@ -96,7 +96,7 @@ class KnowledgeBase:
         return self._storage_path is not None
 
     def _split_chunks(self, text: str, chunk_size: int, chunk_overlap: int) -> List[str]:
-        tokens = self._tokenize(text)
+        tokens = re.findall(TOKEN_PATTERN.pattern, self._normalize(text))
         if not tokens:
             return []
 
