@@ -20,7 +20,8 @@ services:
       - key: RAG_API_KEY
         sync: false
 
-  - type: static_site
+  - type: web
+    env: static
     name: rag-knowledge-assistant-ui
     staticPublishPath: dist
     buildCommand: |
