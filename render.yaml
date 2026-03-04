@@ -11,8 +11,6 @@ services:
         value: /var/data/rag-index.json
       - key: RAG_ALLOWED_ORIGINS
         value: https://<YOUR_FRONTEND_ORIGIN>
-      - key: RAG_GITHUB_PAGES_ORIGIN
-        value: https://<YOUR_FRONTEND_ORIGIN>
       - key: RAG_API_KEY
         sync: false
 

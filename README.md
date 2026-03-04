@@ -179,7 +179,6 @@ Docs UI: `http://localhost:8000/docs`
 - UI (`rag-knowledge-assistant-ui`) publishes a static site with `apiBaseUrl` injected at build time.
 - Set backend environment variables in Render:
   - `RAG_ALLOWED_ORIGINS`: frontend origin
-  - `RAG_GITHUB_PAGES_ORIGIN` (legacy alias): frontend origin
   - `RAG_API_KEY`: secret value if API key is enabled
   - `RAG_STORAGE_PATH`: persistent path, such as `/var/data/rag-index.json`
 - Set frontend environment variable in Render:
