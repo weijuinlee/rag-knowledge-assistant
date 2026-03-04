@@ -365,6 +365,11 @@ def health_check() -> dict:
     return status_data
 
 
+@app.get("/healthz")
+def health_checkz() -> dict:
+    return health_check()
+
+
 @app.get("/", include_in_schema=False, response_model=None)
 def root():
     if _UI_DIR.is_dir():

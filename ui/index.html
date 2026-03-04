@@ -169,7 +169,7 @@
       <section class="card">
         <h2>Connection</h2>
         <label for="api-base">API base URL</label>
-        <input id="api-base" value="http://localhost:8000" />
+        <input id="api-base" placeholder="https://<your-backend-host>" value="" />
 
         <label for="api-key">API key (optional)</label>
         <input id="api-key" type="text" placeholder="x-api-key header value" />
@@ -255,6 +255,27 @@
       const apiKeyInput = document.getElementById("api-key");
       const retrievalSelect = document.getElementById("retrieval");
       const semanticFields = document.getElementById("semantic-fields");
+      const API_BASE_STORAGE_KEY = "rag_assistant_api_base";
+
+      function initApiBase() {
+        const queryBase = new URLSearchParams(window.location.search).get("api");
+        const storedBase = localStorage.getItem(API_BASE_STORAGE_KEY);
+
+        if (queryBase) {
+          apiBaseInput.value = queryBase.trim().replace(/\/$/, "");
+          localStorage.setItem(API_BASE_STORAGE_KEY, apiBaseInput.value);
+          return;
+        }
+
+        if (storedBase) {
+          apiBaseInput.value = storedBase.replace(/\/$/, "");
+          return;
+        }
+
+        if (["localhost", "127.0.0.1"].includes(window.location.hostname)) {
+          apiBaseInput.value = "http://127.0.0.1:8000";
+        }
+      }
 
       function setConnectionStatus(text, ok = true) {
         statusEl.textContent = text;
@@ -262,8 +283,16 @@
       }
 
       function apiBase() {
-        return apiBaseInput.value.replace(/\/$/, "");
+        const value = apiBaseInput.value.trim().replace(/\/$/, "");
+        if (!value) {
+          throw new Error("Set API base URL first (for example https://your-backend-url)");
+        }
+        return value;
       }
+
+      apiBaseInput.addEventListener("change", () => {
+        localStorage.setItem(API_BASE_STORAGE_KEY, apiBaseInput.value.trim().replace(/\/$/, ""));
+      });
 
       function apiHeaders() {
         const headers = {
@@ -281,26 +310,44 @@
 
       async function callApi(path, method, payload = null) {
         const url = `${apiBase()}${path}`;
+        const controller = new AbortController();
+        const timeoutId = window.setTimeout(() => controller.abort(), 8000);
         const options = {
           method,
           headers: apiHeaders(),
+          signal: controller.signal,
         };
         if (payload) {
           options.body = JSON.stringify(payload);
         }
-        const response = await fetch(url, options);
-        const raw = await response.text();
-        let parsed = {};
         try {
-          parsed = raw ? JSON.parse(raw) : {};
-        } catch {
-          parsed = { raw };
+          const response = await fetch(url, options);
+          const raw = await response.text();
+          let parsed = {};
+          try {
+            parsed = raw ? JSON.parse(raw) : {};
+          } catch {
+            parsed = { raw };
+          }
+          if (!response.ok) {
+            throw new Error(parsed.message || parsed.error || JSON.stringify(parsed));
+          }
+          return parsed;
+        } finally {
+          window.clearTimeout(timeoutId);
         }
-        if (!response.ok) {
-          throw new Error(parsed.message || parsed.error || JSON.stringify(parsed));
-        }
-        return parsed;
       }
+
+      document.addEventListener("DOMContentLoaded", () => {
+        initApiBase();
+      });
+
+      window.addEventListener("error", (event) => {
+        const err = event?.error;
+        if (err && err.name === "AbortError") {
+          setConnectionStatus("Request timed out (8s). Check API base URL and network.", false);
+        }
+      });
 
       function parseIntOrDefault(value, fallback) {
         const number = Number.parseInt(value, 10);
