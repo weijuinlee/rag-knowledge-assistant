@@ -33,3 +33,6 @@ htmlcov/
 # Runtime caches
 .ruff_cache/
 .mypy_cache/
+
+# Runtime state
+data/
