@@ -174,12 +174,16 @@ Docs UI: `http://localhost:8000/docs`
 
 ## Deployment
 
-- Dockerfile includes the image entrypoint for API only.
-- `docker-compose.yml` mounts a data volume and wires `RAG_STORAGE_PATH` by default.
-- Update `.env` for environment-specific overrides.
-- GitHub Pages workflow publishes the `ui/` static site from `.github/workflows/pages.yml`:
-  - Push to `main`/`master`, then enable GitHub Pages with source `GitHub Actions`.
-  - If API key is required, set `RAG_ALLOWED_ORIGINS` to your page origin (for example `https://<user>.github.io`).
+- For API and UI together, use the Render blueprint in `render.yaml`.
+- Backend (`rag-knowledge-assistant-api`) exposes `http://...` and serves `/healthz` for readiness probes.
+- UI (`rag-knowledge-assistant-ui`) publishes a static site with `apiBaseUrl` injected at build time.
+- Set backend environment variables in Render:
+  - `RAG_ALLOWED_ORIGINS`: frontend origin
+  - `RAG_GITHUB_PAGES_ORIGIN` (legacy alias): frontend origin
+  - `RAG_API_KEY`: secret value if API key is enabled
+  - `RAG_STORAGE_PATH`: persistent path, such as `/var/data/rag-index.json`
+- Set frontend environment variable in Render:
+  - `VITE_API_BASE_URL`: backend public URL (for example `https://rag-knowledge-assistant-api.onrender.com`)
 
 ---
 
