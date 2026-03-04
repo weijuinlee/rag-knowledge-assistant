@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: rag-knowledge-assistant-api
+    plan: starter
+    env: docker
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health
+    envVars:
+      - key: RAG_HOST
+        value: 0.0.0.0
+      - key: RAG_STORAGE_PATH
+        value: /var/data/rag-index.json
+      - key: RAG_ALLOWED_ORIGINS
+        value: https://<YOUR_VERCEL_FRONTEND_ORIGIN>
+      - key: RAG_API_KEY
+        sync: false
