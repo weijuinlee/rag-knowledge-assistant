@@ -4,6 +4,7 @@ WORKDIR /app
 
 COPY pyproject.toml README.md LICENSE ./
 COPY src ./src
+COPY ui ./ui
 
 RUN pip install --no-cache-dir -e .
 RUN mkdir -p /app/data

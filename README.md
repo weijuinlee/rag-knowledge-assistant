@@ -174,15 +174,40 @@ Docs UI: `http://localhost:8000/docs`
 
 ## Deployment
 
-- For API and UI together, use the Render blueprint in `render.yaml`.
-- Backend (`rag-knowledge-assistant-api`) exposes `http://...` and serves `/healthz` for readiness probes.
-- UI (`rag-knowledge-assistant-ui`) publishes a static site with `apiBaseUrl` injected at build time.
-- Set backend environment variables in Render:
-  - `RAG_ALLOWED_ORIGINS`: frontend origin
-  - `RAG_API_KEY`: secret value if API key is enabled
-  - `RAG_STORAGE_PATH`: persistent path, such as `/var/data/rag-index.json`
-- Set frontend environment variable in Render:
-  - `VITE_API_BASE_URL`: backend public URL (for example `https://rag-knowledge-assistant-api.onrender.com`)
+- Backend: Render (from `render.yaml`)
+  - Render keeps the existing `rag-knowledge-assistant-api` config in this repo.
+  - The service uses Docker and exposes:
+    - `GET /health`
+    - `GET /healthz`
+  - Set these env vars in Render:
+    - `RAG_HOST=0.0.0.0`
+    - `RAG_STORAGE_PATH=/var/data/rag-index.json`
+    - `RAG_ALLOWED_ORIGINS=https://<YOUR_VERCEL_FRONTEND>`
+    - `RAG_API_KEY` (optional, use Sync: false)
+  - Verify backend health after deploy: `curl https://<backend>/health`
+
+- Frontend: Vercel (from `vercel.json`)
+  - Create a new Vercel project and point it at this repository.
+  - Keep `vercel.json` as-is; it publishes files from `ui/` as static assets.
+  - Deploy the project and open:
+    - `https://<frontend>.vercel.app/?api=https://<backend>`
+  - Replace `<backend>` with your Render URL.
+  - The UI writes the URL to browser local storage after first use.
+- CORS note:
+  - Ensure backend `RAG_ALLOWED_ORIGINS` includes your Vercel domain (no trailing slash).
+
+### Quick deploy sanity checks
+
+- Backend health:
+  - `curl https://<backend>/health`
+  - `curl -X POST https://<backend>/query -H "Content-Type: application/json" -d '{"question":"What is RAG?"}'`
+  - A fresh backend with no docs returns `404`.
+- Frontend health check button:
+  - Open UI and click **Check /health** after setting the API base URL.
+- Local smoke check after any deploy:
+  - `curl https://<backend>/health`
+  - `curl -X POST https://<backend>/query -H "Content-Type: application/json" -d '{"question":"What is RAG?"}'`
+- If UI says “Set API base URL first”, open it with `?api=https://<backend>`.
 
 ---
 
