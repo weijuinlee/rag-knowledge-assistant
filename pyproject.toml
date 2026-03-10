@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "rag-knowledge-assistant"
-version = "0.2.0"
-description = "Open-source minimal RAG knowledge assistant with a FastAPI retrieval API."
+version = "0.3.0"
+description = "RAG knowledge assistant with smart chunking, hybrid retrieval, reranking, and eval APIs."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { file = "LICENSE" }

@@ -1,5 +1,6 @@
 from rag_assistant.knowledge_base import KnowledgeBase
 import pytest
+from rag_assistant.evals import run_retrieval_eval
 
 
 def test_ingest_and_query_returns_expected_chunks():
@@ -67,3 +68,65 @@ def test_query_semantic_onnx_provider_missing_model():
         assert "ONNX model path does not exist" in str(exc)
     else:
         raise AssertionError("Expected RuntimeError when ONNX path is invalid")
+
+
+def test_smart_chunking_preserves_sentence_boundaries():
+    kb = KnowledgeBase(chunk_size=8, chunk_overlap=2)
+    indexed = kb.ingest(
+        "smart-doc",
+        "RAG improves answers. It retrieves relevant context first.\n\nChunking should respect paragraphs and sentences.",
+        chunking_strategy="smart",
+    )
+
+    assert indexed >= 2
+    result = kb.query("How does RAG improve answers?", top_k=2)
+    assert result
+    assert "." in result[0].text
+    assert result[0].metadata["chunking_strategy"] == "smart"
+
+
+def test_hybrid_query_with_reranker_returns_traceable_results():
+    kb = KnowledgeBase(chunk_size=6, chunk_overlap=1)
+    kb.ingest("alpha", "RAG systems retrieve grounded context before generating answers.")
+    kb.ingest("beta", "Databases store rows and tables for transactional workloads.")
+
+    results, trace = kb.query_with_trace(
+        "Which system retrieves grounded context?",
+        retrieval="hybrid",
+        embedding_provider="local",
+        reranker="term_overlap",
+        top_k=2,
+        candidate_pool_size=4,
+    )
+
+    assert results
+    assert results[0].source_id == "alpha"
+    assert trace["retrieval"] == "hybrid"
+    assert trace["reranker"] == "term_overlap"
+    assert any(stage["stage"] == "rrf_fusion" for stage in trace["stages"])
+
+
+def test_eval_harness_reports_hit_rate_and_mrr():
+    kb = KnowledgeBase(chunk_size=8, chunk_overlap=2)
+    kb.ingest("guide", "RAG uses retrieval to ground generation in retrieved documents.")
+    kb.ingest("cookbook", "Recipes explain ingredients, temperatures, and timing.")
+
+    report = run_retrieval_eval(
+        kb,
+        [
+            {
+                "question": "What grounds generation in documents?",
+                "expected_source_ids": ["guide"],
+                "retrieval": "hybrid",
+                "embedding_provider": "local",
+                "reranker": "term_overlap",
+                "top_k": 3,
+                "candidate_pool_size": 6,
+            }
+        ],
+    )
+
+    assert report["cases"] == 1
+    assert report["hits"] == 1
+    assert report["hit_rate"] == 1.0
+    assert report["mrr"] == 1.0

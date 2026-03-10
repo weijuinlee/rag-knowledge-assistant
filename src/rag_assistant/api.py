@@ -17,12 +17,15 @@ from fastapi.staticfiles import StaticFiles
 
 from rag_assistant import __version__
 from rag_assistant.config import AppConfig
+from rag_assistant.evals import run_retrieval_eval
 from rag_assistant.knowledge_base import KnowledgeBase
 from rag_assistant.models import (
     BulkIngestRequest,
     BulkIngestResponse,
     ContextChunk,
     DeleteResponse,
+    EvalRequest,
+    EvalResponse,
     ErrorResponse,
     IngestRequest,
     IngestResponse,
@@ -287,7 +290,7 @@ def _format_answer(context: list[ContextChunk]) -> str:
     )
 
 
-def _query_response(chunks: list) -> QueryResponse:
+def _query_response(chunks: list, trace: dict | None = None) -> QueryResponse:
     context = [
         ContextChunk(
             source_id=item.source_id,
@@ -299,7 +302,12 @@ def _query_response(chunks: list) -> QueryResponse:
         for item in chunks
     ]
 
-    return QueryResponse(answer=_format_answer(context), context=context, count=len(context))
+    return QueryResponse(
+        answer=_format_answer(context),
+        context=context,
+        count=len(context),
+        trace=trace or {},
+    )
 
 
 async def _guard_api_key(x_api_key: str | None = Header(default=None, alias="x-api-key")) -> None:
@@ -419,6 +427,7 @@ def ingest(payload: IngestRequest):
             payload.content,
             chunk_size=payload.chunk_size,
             chunk_overlap=payload.chunk_overlap,
+            chunking_strategy=payload.chunking_strategy,
             metadata=payload.metadata,
         )
     except Exception as exc:
@@ -453,6 +462,7 @@ def ingest_bulk(payload: BulkIngestRequest):
                 document.content,
                 chunk_size=document.chunk_size,
                 chunk_overlap=document.chunk_overlap,
+                chunking_strategy=document.chunking_strategy,
                 metadata=document.metadata,
             )
         except Exception as exc:
@@ -479,12 +489,16 @@ def ingest_bulk(payload: BulkIngestRequest):
 )
 def query(payload: QueryRequest):
     try:
-        chunks = kb.query(
+        chunks, trace = kb.query_with_trace(
             payload.question,
             top_k=payload.top_k,
             min_score=payload.min_score,
             retrieval=payload.retrieval,
             embedding_model=payload.embedding_model,
+            embedding_provider=payload.embedding_provider,
+            local_dimensions=payload.local_dimensions,
+            reranker=payload.reranker,
+            candidate_pool_size=payload.candidate_pool_size,
         )
     except Exception as exc:
         raise _wrap_kb_errors(exc) from exc
@@ -494,7 +508,7 @@ def query(payload: QueryRequest):
             detail="No matching chunks found. Ingest documents first using /ingest.",
         )
 
-    return _query_response(chunks)
+    return _query_response(chunks, trace=trace)
 
 
 @app.post(
@@ -511,7 +525,7 @@ def query(payload: QueryRequest):
 )
 def query_semantic(payload: SemanticQueryRequest):
     try:
-        chunks = kb.query(
+        chunks, trace = kb.query_with_trace(
             payload.question,
             top_k=payload.top_k,
             min_score=payload.min_score,
@@ -519,6 +533,8 @@ def query_semantic(payload: SemanticQueryRequest):
             embedding_model=payload.embedding_model,
             embedding_provider=payload.embedding_provider,
             local_dimensions=payload.local_dimensions,
+            reranker=payload.reranker,
+            candidate_pool_size=payload.candidate_pool_size,
         )
     except Exception as exc:
         raise _wrap_kb_errors(exc) from exc
@@ -528,7 +544,7 @@ def query_semantic(payload: SemanticQueryRequest):
             detail="No matching chunks found. Ingest documents first using /ingest.",
         )
 
-    return _query_response(chunks)
+    return _query_response(chunks, trace=trace)
 
 
 @app.delete(
@@ -576,3 +592,29 @@ def clear_all():
 )
 def metrics():
     return _metrics_collector.snapshot()
+
+
+@app.post(
+    "/evals/run",
+    response_model=EvalResponse,
+    responses={
+        400: {"model": ErrorResponse},
+        401: {"model": ErrorResponse},
+        404: {"model": ErrorResponse},
+        429: {"model": ErrorResponse},
+        503: {"model": ErrorResponse},
+    },
+    dependencies=[Depends(_guard_api_key)],
+)
+def run_evals(payload: EvalRequest):
+    if kb.stats()["chunks"] == 0:
+        raise HTTPException(
+            status_code=404,
+            detail="No indexed chunks available. Ingest documents before running evals.",
+        )
+
+    try:
+        results = run_retrieval_eval(kb, [case.model_dump() for case in payload.cases])
+    except Exception as exc:
+        raise _wrap_kb_errors(exc) from exc
+    return EvalResponse(**results)

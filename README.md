@@ -1,14 +1,14 @@
 # RAG Knowledge Assistant
 
-`rag-knowledge-assistant` is a minimal open-source retrieval API for experimentation and production-ready prototyping.
+`rag-knowledge-assistant` is an open-source RAG API with smart chunking, hybrid retrieval, rerankers, and a built-in eval harness.
 
-The API supports lexical TF-IDF retrieval and optional semantic retrieval using pluggable embedding providers.
+The API supports lexical TF-IDF retrieval, pluggable semantic embeddings, query traces, and offline retrieval evaluation.
 
 ---
 
 ## Current status
 
-- Version: `0.2.0`
+- Version: `0.3.0`
 - Storage can be run in-memory (default) or with file-backed persistence.
 - Auth, rate limiting, request validation responses, metrics, and health endpoints included.
 
@@ -16,8 +16,11 @@ The API supports lexical TF-IDF retrieval and optional semantic retrieval using 
 
 ## Features
 
-- Ingest and chunk documents via HTTP.
-- TF-IDF and semantic retrieval endpoints.
+- Ingest and chunk documents via HTTP with `tokens`, `sentence`, `paragraph`, or `smart` chunking.
+- TF-IDF, semantic, and hybrid retrieval modes.
+- Lightweight lexical reranker (`term_overlap`) and reciprocal-rank fusion for hybrid search.
+- Query traces that expose retrieval stages and candidate counts.
+- Retrieval eval harness via API and Python helper.
 - File-backed persistence with resumable startup index loading.
 - Pluggable semantic providers (`sentence_transformers`, `local`, `local_tfidf`, `onnx_local`).
 - Config/env-first runtime configuration.
@@ -109,7 +112,7 @@ python -m rag_assistant.cli
 curl -X POST http://localhost:8000/ingest \
   -H "Content-Type: application/json" \
   -H "x-api-key: ${RAG_API_KEY}" \
-  -d '{"source_id":"guide-1","content":"RAG combines retrieval with generation."}'
+  -d '{"source_id":"guide-1","content":"RAG combines retrieval with generation.","chunking_strategy":"smart"}'
 ```
 
 ### 6) Query
@@ -118,7 +121,7 @@ curl -X POST http://localhost:8000/ingest \
 curl -X POST http://localhost:8000/query \
   -H "Content-Type: application/json" \
   -H "x-api-key: ${RAG_API_KEY}" \
-  -d '{"question":"What is RAG?","top_k":3}'
+  -d '{"question":"What is RAG?","top_k":3,"retrieval":"hybrid","embedding_provider":"local","reranker":"term_overlap","candidate_pool_size":8}'
 ```
 
 ### Semantic query
@@ -139,6 +142,15 @@ curl -X POST http://localhost:8000/query/semantic \
   -d '{"question":"How can embeddings be generated?","top_k":3,"embedding_provider":"local_tfidf","local_dimensions":64}'
 ```
 
+### 6a) Run retrieval evals
+
+```bash
+curl -X POST http://localhost:8000/evals/run \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: ${RAG_API_KEY}" \
+  -d '{"cases":[{"question":"What is RAG?","expected_source_ids":["guide-1"],"retrieval":"hybrid","embedding_provider":"local","reranker":"term_overlap"}]}'
+```
+
 ### 7) Optional: tests
 
 ```bash
@@ -157,6 +169,7 @@ pytest
 - `POST /ingest/bulk` — ingest many documents
 - `POST /query` — retrieve top-k relevant chunks
 - `POST /query/semantic` — semantic-only query endpoint
+- `POST /evals/run` — run retrieval eval cases against indexed content
 - `DELETE /documents/{source_id}` — remove all chunks for a source
 - `DELETE /clear` — clear index
 

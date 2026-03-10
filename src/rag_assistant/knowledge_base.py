@@ -12,6 +12,11 @@ from typing import Any, Dict, List
 from rag_assistant.embeddings import EmbeddingProviderError, ProviderSpec, build_embedding_provider
 
 TOKEN_PATTERN = re.compile(r"[a-zA-Z0-9]+")
+SENTENCE_PATTERN = re.compile(r"(?<=[.!?])\s+")
+PARAGRAPH_PATTERN = re.compile(r"\n\s*\n+")
+SUPPORTED_CHUNKING_STRATEGIES = {"tokens", "sentence", "paragraph", "smart"}
+SUPPORTED_RETRIEVAL_MODES = {"tfidf", "semantic", "hybrid"}
+SUPPORTED_RERANKERS = {"none", "term_overlap"}
 
 
 class KnowledgeBaseError(RuntimeError):
@@ -68,12 +73,44 @@ class KnowledgeBase:
             raise ValueError("chunk_overlap must be less than chunk_size")
 
     @staticmethod
+    def _validate_chunking_strategy(chunking_strategy: str) -> str:
+        normalized = chunking_strategy.strip().lower()
+        if normalized not in SUPPORTED_CHUNKING_STRATEGIES:
+            raise ValueError(
+                "chunking_strategy must be one of: tokens, sentence, paragraph, smart"
+            )
+        return normalized
+
+    @staticmethod
+    def _validate_query_config(retrieval: str, reranker: str) -> tuple[str, str]:
+        normalized_retrieval = retrieval.strip().lower()
+        normalized_reranker = reranker.strip().lower()
+        if normalized_retrieval not in SUPPORTED_RETRIEVAL_MODES:
+            raise ValueError("retrieval must be one of: tfidf, semantic, hybrid")
+        if normalized_reranker not in SUPPORTED_RERANKERS:
+            raise ValueError("reranker must be one of: none, term_overlap")
+        return normalized_retrieval, normalized_reranker
+
+    @staticmethod
     def _normalize(text: str) -> str:
         return " ".join(text.split())
 
     @staticmethod
     def _tokenize(text: str) -> List[str]:
         return TOKEN_PATTERN.findall(KnowledgeBase._normalize(text).lower())
+
+    @staticmethod
+    def _split_sentences(text: str) -> List[str]:
+        normalized = KnowledgeBase._normalize(text)
+        if not normalized:
+            return []
+        sentences = [segment.strip() for segment in SENTENCE_PATTERN.split(normalized) if segment.strip()]
+        return sentences or [normalized]
+
+    @staticmethod
+    def _split_paragraphs(text: str) -> List[str]:
+        paragraphs = [KnowledgeBase._normalize(block) for block in PARAGRAPH_PATTERN.split(text) if block.strip()]
+        return [paragraph for paragraph in paragraphs if paragraph]
 
     @staticmethod
     def _normalize_metadata(metadata: Dict[str, Any] | None) -> Dict[str, Any]:
@@ -95,7 +132,7 @@ class KnowledgeBase:
     def persistent(self) -> bool:
         return self._storage_path is not None
 
-    def _split_chunks(self, text: str, chunk_size: int, chunk_overlap: int) -> List[str]:
+    def _split_chunks_tokens(self, text: str, chunk_size: int, chunk_overlap: int) -> List[str]:
         tokens = re.findall(TOKEN_PATTERN.pattern, self._normalize(text))
         if not tokens:
             return []
@@ -112,6 +149,73 @@ class KnowledgeBase:
                 break
 
         return chunks
+
+    def _chunk_units(self, units: List[str], chunk_size: int, chunk_overlap: int) -> List[str]:
+        chunks: List[str] = []
+        current_units: List[str] = []
+        current_token_count = 0
+
+        for unit in units:
+            clean_unit = self._normalize(unit)
+            unit_tokens = self._tokenize(clean_unit)
+            if not unit_tokens:
+                continue
+
+            if len(unit_tokens) >= chunk_size:
+                if current_units:
+                    chunks.append(self._normalize(" ".join(current_units)))
+                    current_units = []
+                    current_token_count = 0
+                chunks.extend(self._split_chunks_tokens(clean_unit, chunk_size, chunk_overlap))
+                continue
+
+            if current_units and current_token_count + len(unit_tokens) > chunk_size:
+                chunks.append(self._normalize(" ".join(current_units)))
+                overlap_units: List[str] = []
+                overlap_tokens = 0
+                for previous_unit in reversed(current_units):
+                    previous_tokens = self._tokenize(previous_unit)
+                    overlap_units.insert(0, previous_unit)
+                    overlap_tokens += len(previous_tokens)
+                    if overlap_tokens >= chunk_overlap:
+                        break
+                current_units = overlap_units
+                current_token_count = sum(len(self._tokenize(item)) for item in current_units)
+
+            current_units.append(clean_unit)
+            current_token_count += len(unit_tokens)
+
+        if current_units:
+            chunks.append(self._normalize(" ".join(current_units)))
+
+        return chunks
+
+    def _split_chunks(
+        self,
+        text: str,
+        chunk_size: int,
+        chunk_overlap: int,
+        chunking_strategy: str,
+    ) -> List[str]:
+        strategy = self._validate_chunking_strategy(chunking_strategy)
+        if strategy == "tokens":
+            return self._split_chunks_tokens(text, chunk_size, chunk_overlap)
+
+        if strategy == "sentence":
+            return self._chunk_units(self._split_sentences(text), chunk_size, chunk_overlap)
+
+        paragraphs = self._split_paragraphs(text)
+        if strategy == "paragraph":
+            return self._chunk_units(paragraphs, chunk_size, chunk_overlap)
+
+        smart_units: List[str] = []
+        for paragraph in paragraphs or [text]:
+            paragraph_tokens = self._tokenize(paragraph)
+            if len(paragraph_tokens) <= max(1, chunk_size // 2):
+                smart_units.append(paragraph)
+                continue
+            smart_units.extend(self._split_sentences(paragraph))
+        return self._chunk_units(smart_units, chunk_size, chunk_overlap)
 
     @staticmethod
     def _vectorize(tokens: List[str], doc_freq: Dict[str, int], n_chunks: int) -> Dict[str, float]:
@@ -326,6 +430,7 @@ class KnowledgeBase:
         *,
         chunk_size: int | None = None,
         chunk_overlap: int | None = None,
+        chunking_strategy: str = "tokens",
         metadata: Dict[str, Any] | None = None,
     ) -> int:
         if not source_id or not source_id.strip():
@@ -338,19 +443,27 @@ class KnowledgeBase:
         chunk_size = chunk_size or self._chunk_size
         chunk_overlap = chunk_overlap or self._chunk_overlap
         self._validate_chunk_config(chunk_size, chunk_overlap)
+        normalized_chunking_strategy = self._validate_chunking_strategy(chunking_strategy)
 
-        text = self._normalize(content)
-        chunks = self._split_chunks(text, chunk_size, chunk_overlap)
+        chunks = self._split_chunks(
+            content,
+            chunk_size,
+            chunk_overlap,
+            normalized_chunking_strategy,
+        )
 
         with self._lock:
             indexed = 0
             for idx, chunk_text in enumerate(chunks):
+                chunk_metadata = dict(safe_metadata)
+                chunk_metadata.setdefault("chunking_strategy", normalized_chunking_strategy)
+                chunk_metadata.setdefault("token_count", len(self._tokenize(chunk_text)))
                 self._chunks.append(
                     {
                         "source_id": normalized_source_id,
                         "chunk_index": idx,
                         "text": chunk_text,
-                        "metadata": safe_metadata,
+                        "metadata": chunk_metadata,
                     }
                 )
                 indexed += 1
@@ -476,6 +589,183 @@ class KnowledgeBase:
         scored.sort(key=lambda item: item.score, reverse=True)
         return scored[:top_k]
 
+    @staticmethod
+    def _chunk_key(chunk: RetrievedChunk) -> tuple[str, int]:
+        return (chunk.source_id, chunk.chunk_index)
+
+    def _merge_rankings_rrf(
+        self,
+        rankings: List[List[RetrievedChunk]],
+        *,
+        top_k: int,
+        rank_constant: int = 60,
+    ) -> List[RetrievedChunk]:
+        fused_scores: Dict[tuple[str, int], float] = defaultdict(float)
+        canonical_chunk: Dict[tuple[str, int], RetrievedChunk] = {}
+
+        for ranking in rankings:
+            for rank, chunk in enumerate(ranking, start=1):
+                key = self._chunk_key(chunk)
+                fused_scores[key] += 1.0 / (rank_constant + rank)
+                canonical_chunk[key] = chunk
+
+        fused = [
+            RetrievedChunk(
+                source_id=chunk.source_id,
+                chunk_index=chunk.chunk_index,
+                text=chunk.text,
+                score=fused_scores[key],
+                metadata=chunk.metadata,
+            )
+            for key, chunk in canonical_chunk.items()
+        ]
+        fused.sort(key=lambda item: item.score, reverse=True)
+        return fused[:top_k]
+
+    def _rerank_chunks(
+        self,
+        question: str,
+        chunks: List[RetrievedChunk],
+        *,
+        reranker: str,
+        top_k: int,
+    ) -> List[RetrievedChunk]:
+        if reranker == "none":
+            return chunks[:top_k]
+
+        question_tokens = self._tokenize(question)
+        if not question_tokens:
+            return chunks[:top_k]
+
+        question_terms = set(question_tokens)
+        question_bigrams = set(zip(question_tokens, question_tokens[1:]))
+        normalized_question = self._normalize(question).lower()
+
+        reranked: List[RetrievedChunk] = []
+        for chunk in chunks:
+            chunk_tokens = self._tokenize(chunk.text)
+            if not chunk_tokens:
+                reranked.append(chunk)
+                continue
+
+            chunk_terms = set(chunk_tokens)
+            chunk_bigrams = set(zip(chunk_tokens, chunk_tokens[1:]))
+            overlap_score = len(question_terms & chunk_terms) / max(1, len(question_terms))
+            bigram_score = len(question_bigrams & chunk_bigrams) / max(1, len(question_bigrams))
+            exact_phrase_bonus = (
+                1.0 if normalized_question and normalized_question in self._normalize(chunk.text).lower() else 0.0
+            )
+            reranked.append(
+                RetrievedChunk(
+                    source_id=chunk.source_id,
+                    chunk_index=chunk.chunk_index,
+                    text=chunk.text,
+                    score=(0.55 * chunk.score) + (0.3 * overlap_score) + (0.1 * bigram_score) + (0.05 * exact_phrase_bonus),
+                    metadata=chunk.metadata,
+                )
+            )
+
+        reranked.sort(key=lambda item: item.score, reverse=True)
+        return reranked[:top_k]
+
+    def query_with_trace(
+        self,
+        question: str,
+        top_k: int = 5,
+        min_score: float = 0.0,
+        retrieval: str = "tfidf",
+        embedding_model: str | None = None,
+        embedding_provider: str = "sentence_transformers",
+        local_dimensions: int = 64,
+        reranker: str = "none",
+        candidate_pool_size: int | None = None,
+    ) -> tuple[List[RetrievedChunk], Dict[str, Any]]:
+        if not question or not question.strip():
+            return [], {"retrieval": retrieval, "reranker": reranker, "stages": []}
+
+        normalized_retrieval, normalized_reranker = self._validate_query_config(retrieval, reranker)
+        candidate_limit = max(top_k, candidate_pool_size or top_k)
+
+        with self._lock:
+            if not self._chunks:
+                return [], {
+                    "retrieval": normalized_retrieval,
+                    "reranker": normalized_reranker,
+                    "stages": [],
+                    "candidates_considered": 0,
+                }
+
+            stages: List[Dict[str, Any]] = []
+            if normalized_retrieval == "tfidf":
+                candidates = self._query_tfidf(question=question, top_k=candidate_limit, min_score=min_score)
+                stages.append({"stage": "tfidf", "candidates": len(candidates)})
+            elif normalized_retrieval == "semantic":
+                candidates = self._query_semantic(
+                    question,
+                    top_k=candidate_limit,
+                    min_score=min_score,
+                    embedding_model=embedding_model,
+                    embedding_provider=embedding_provider,
+                    local_dimensions=local_dimensions,
+                )
+                stages.append(
+                    {
+                        "stage": "semantic",
+                        "candidates": len(candidates),
+                        "embedding_provider": embedding_provider,
+                        "embedding_model": embedding_model or self._default_embedding_model,
+                    }
+                )
+            else:
+                tfidf_candidates = self._query_tfidf(
+                    question=question,
+                    top_k=candidate_limit,
+                    min_score=min_score,
+                )
+                semantic_candidates = self._query_semantic(
+                    question,
+                    top_k=candidate_limit,
+                    min_score=min_score,
+                    embedding_model=embedding_model,
+                    embedding_provider=embedding_provider,
+                    local_dimensions=local_dimensions,
+                )
+                stages.extend(
+                    [
+                        {"stage": "tfidf", "candidates": len(tfidf_candidates)},
+                        {
+                            "stage": "semantic",
+                            "candidates": len(semantic_candidates),
+                            "embedding_provider": embedding_provider,
+                            "embedding_model": embedding_model or self._default_embedding_model,
+                        },
+                    ]
+                )
+                candidates = self._merge_rankings_rrf(
+                    [tfidf_candidates, semantic_candidates],
+                    top_k=candidate_limit,
+                )
+                stages.append({"stage": "rrf_fusion", "candidates": len(candidates)})
+
+            reranked = self._rerank_chunks(
+                question,
+                candidates,
+                reranker=normalized_reranker,
+                top_k=top_k,
+            )
+            if normalized_reranker != "none":
+                stages.append({"stage": normalized_reranker, "candidates": len(reranked)})
+
+            trace = {
+                "retrieval": normalized_retrieval,
+                "reranker": normalized_reranker,
+                "candidate_pool_size": candidate_limit,
+                "candidates_considered": len(candidates),
+                "returned_chunks": len(reranked),
+                "stages": stages,
+            }
+            return reranked, trace
+
     def query(
         self,
         question: str,
@@ -485,28 +775,21 @@ class KnowledgeBase:
         embedding_model: str | None = None,
         embedding_provider: str = "sentence_transformers",
         local_dimensions: int = 64,
+        reranker: str = "none",
+        candidate_pool_size: int | None = None,
     ) -> List[RetrievedChunk]:
-        if not question or not question.strip():
-            return []
-
-        if retrieval not in {"tfidf", "semantic"}:
-            raise ValueError("retrieval must be either 'tfidf' or 'semantic'")
-
-        with self._lock:
-            if not self._chunks:
-                return []
-
-            if retrieval == "semantic":
-                return self._query_semantic(
-                    question,
-                    top_k=top_k,
-                    min_score=min_score,
-                    embedding_model=embedding_model,
-                    embedding_provider=embedding_provider,
-                    local_dimensions=local_dimensions,
-                )
-
-            return self._query_tfidf(question=question, top_k=top_k, min_score=min_score)
+        chunks, _ = self.query_with_trace(
+            question,
+            top_k=top_k,
+            min_score=min_score,
+            retrieval=retrieval,
+            embedding_model=embedding_model,
+            embedding_provider=embedding_provider,
+            local_dimensions=local_dimensions,
+            reranker=reranker,
+            candidate_pool_size=candidate_pool_size,
+        )
+        return chunks
 
     def remove_source(self, source_id: str) -> int:
         with self._lock:
